@@ -41,6 +41,34 @@
     *{animation-duration:0.001ms !important; transition-duration:0.001ms !important;}
   }
 
+  /* ---------- Championship banners ---------- */
+  .banner-strip{
+    background:var(--surface); border-bottom:1px solid var(--line);
+    padding:14px 0;
+  }
+  .banner-scroll{
+    display:flex; gap:14px; overflow-x:auto; padding:0 24px; max-width:1180px; margin:0 auto;
+    -webkit-overflow-scrolling:touch; scrollbar-width:none;
+  }
+  .banner-scroll::-webkit-scrollbar{display:none;}
+  .pennant{
+    flex:0 0 auto; width:130px; position:relative;
+    background:linear-gradient(180deg, var(--surface-2), var(--bg));
+    border:1px solid var(--line); border-bottom:none;
+    padding:12px 10px 22px; text-align:center;
+    clip-path:polygon(0 0, 100% 0, 100% 78%, 50% 100%, 0 78%);
+  }
+  .pennant.tbd{opacity:0.55;}
+  .pennant.current{border-color:var(--gold); box-shadow:0 0 14px var(--gold-glow);}
+  .pennant .year{
+    font-family:'JetBrains Mono'; font-size:11px; color:var(--muted); letter-spacing:1px;
+  }
+  .pennant .champ{
+    font-family:'Space Grotesk'; font-weight:700; font-size:14px; margin-top:6px; line-height:1.25;
+    color:var(--gold);
+  }
+  .pennant.tbd .champ{color:var(--muted); font-weight:600;}
+
   /* ---------- Header ---------- */
   header{
     position:sticky; top:0; z-index:50;
@@ -104,7 +132,7 @@
   }
   .bw-head{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:22px; flex-wrap:wrap; gap:8px;}
   .bw-head h2{margin:0; font-size:20px;}
-  .bw-legend{display:flex; gap:16px; font-size:12px; color:var(--muted);}
+  .bw-legend{display:flex; gap:16px; font-size:12px; color:var(--muted); flex-wrap:wrap; margin-bottom:6px;}
   .bw-legend span{display:inline-flex; align-items:center; gap:6px;}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
   .dot.gold{background:var(--gold);} .dot.teal{background:var(--teal);}
@@ -114,7 +142,7 @@
     min-width:640px; /* ensures nodes always have room; scroll on narrow screens */
   }
   .bw-scroll{
-    overflow-x:auto; overflow-y:visible; padding-top:22px; -webkit-overflow-scrolling:touch;
+    overflow-x:auto; overflow-y:visible; padding-top:40px; -webkit-overflow-scrolling:touch;
   }
   @media (max-width:700px){
     .bw-node{width:28px; height:28px; font-size:10px;}
@@ -294,6 +322,10 @@
   </nav>
 </header>
 
+<div class="banner-strip" id="bannerStrip">
+  <div class="banner-scroll" id="bannerScroll"><div class="loading" style="padding:0 24px;">Loading banners…</div></div>
+</div>
+
 <main>
 
   <!-- DASHBOARD -->
@@ -470,6 +502,7 @@
         <option value="ranking">Power Ranking entry</option>
         <option value="history">History / Trophy Case entry</option>
         <option value="identity">Team Identity (color)</option>
+        <option value="champion">Championship Banner</option>
       </select>
       <label id="postTitleLabel">Title / Team</label>
       <input type="text" id="postTitle" placeholder="e.g. Team name or headline">
@@ -478,6 +511,10 @@
       <div id="colorPickerRow" style="display:none;">
         <label>Color</label>
         <input type="color" id="postColor" value="#E8B84B" style="width:100%;height:38px;padding:2px;">
+      </div>
+      <div id="yearPickerRow" style="display:none;">
+        <label>Season year</label>
+        <input type="text" id="postYear" placeholder="e.g. 2026">
       </div>
       <div class="btn-row">
         <button class="btn" id="postSubmit">Post</button>
@@ -546,7 +583,7 @@ document.querySelectorAll(".tab-btn[data-tab]").forEach(btn => {
    SLEEPER DATA LAYER
    ========================================================= */
 async function sleeperGet(path) {
-  const res = await fetch(`${SLEEPER}${path}`);
+  const res = await fetch(`${SLEEPER}${path}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Sleeper API error ${res.status} on ${path}`);
   return res.json();
 }
@@ -890,6 +927,30 @@ async function applyTeamIdentity() {
   } catch (e) { console.warn("Team identity load failed:", e); }
 }
 
+/* ---------- Championship banners ---------- */
+async function renderBanners() {
+  const el = document.getElementById("bannerScroll");
+  const currentYear = state.league?.season || new Date().getFullYear().toString();
+  let champs = {};
+  if (db) {
+    try {
+      const snap = await db.collection("champions").orderBy("year", "desc").get();
+      snap.docs.forEach(d => { const v = d.data(); champs[v.year] = v; });
+    } catch (e) { console.warn("Couldn't load champions:", e); }
+  }
+  if (!champs[currentYear]) champs[currentYear] = { year: currentYear, teamName: "TBD" };
+
+  const years = Object.keys(champs).sort((a,b) => b - a);
+  el.innerHTML = years.map(y => {
+    const c = champs[y];
+    const isTbd = !c.teamName || c.teamName.toUpperCase() === "TBD";
+    return `<div class="pennant ${isTbd ? 'tbd' : ''} ${y === currentYear ? 'current' : ''}">
+        <div class="year">${y}</div>
+        <div class="champ">${isTbd ? 'TBD' : c.teamName}</div>
+      </div>`;
+  }).join("");
+}
+
 async function loadLeague() {
   try {
     const league = await sleeperGet(`/league/${LEAGUES.current.id}`);
@@ -920,6 +981,7 @@ async function loadLeague() {
     loadH2H();
     renderOtherLeague();
     applyTeamIdentity();
+    renderBanners();
   } catch (e) {
     document.getElementById("leagueSub").textContent = "Couldn't load league data";
     document.getElementById("bwTrack").innerHTML = `<div class="empty">Couldn't reach Sleeper (${e.message}). Check the league ID in the config.</div>`;
@@ -987,10 +1049,19 @@ document.getElementById("adminClose").addEventListener("click", () => adminPanel
 document.getElementById("adminClose2").addEventListener("click", () => adminPanel.classList.remove("open"));
 
 document.getElementById("postType").addEventListener("change", (e) => {
-  const isIdentity = e.target.value === "identity";
-  document.getElementById("colorPickerRow").style.display = isIdentity ? "block" : "none";
-  document.getElementById("postTitleLabel").textContent = isIdentity ? "Team name (must match exactly)" : "Title / Team";
-  document.getElementById("postBodyLabel").textContent = isIdentity ? "Nickname (optional)" : "Body";
+  const type = e.target.value;
+  document.getElementById("colorPickerRow").style.display = type === "identity" ? "block" : "none";
+  document.getElementById("yearPickerRow").style.display = type === "champion" ? "block" : "none";
+  if (type === "identity") {
+    document.getElementById("postTitleLabel").textContent = "Team name (must match exactly)";
+    document.getElementById("postBodyLabel").textContent = "Nickname (optional)";
+  } else if (type === "champion") {
+    document.getElementById("postTitleLabel").textContent = "Champion team name";
+    document.getElementById("postBodyLabel").textContent = "Note (optional)";
+  } else {
+    document.getElementById("postTitleLabel").textContent = "Title / Team";
+    document.getElementById("postBodyLabel").textContent = "Body";
+  }
 });
 
 document.getElementById("adminUnlock").addEventListener("click", () => {
@@ -1009,6 +1080,18 @@ document.getElementById("postSubmit").addEventListener("click", async () => {
   const title = document.getElementById("postTitle").value.trim();
   const body = document.getElementById("postBody").value.trim();
   if (!title && !body) return;
+
+  if (type === "champion") {
+    const year = document.getElementById("postYear").value.trim();
+    if (!year) { alert("Enter a season year."); return; }
+    await db.collection("champions").doc(year).set({ year, teamName: title, note: body });
+    document.getElementById("postTitle").value = "";
+    document.getElementById("postBody").value = "";
+    document.getElementById("postYear").value = "";
+    adminPanel.classList.remove("open");
+    renderBanners();
+    return;
+  }
 
   if (type === "identity") {
     const color = document.getElementById("postColor").value;
