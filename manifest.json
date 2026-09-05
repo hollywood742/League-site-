@@ -1,0 +1,12 @@
+{
+  "name": "League One Fantasy Football",
+  "short_name": "League One",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#05070A",
+  "theme_color": "#0E1712",
+  "icons": [
+    { "src": "logo.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "logo.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
