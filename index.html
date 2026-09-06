@@ -3,7 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>The Cutline</title>
+<title>League One · Fantasy Football</title>
+<meta property="og:title" content="League One · Fantasy Football">
+<meta property="og:description" content="Live standings, matchups, and the Major/Minor cutline — powered by Sleeper.">
+<meta property="og:image" content="hero.jpg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="League One · Fantasy Football">
+<meta name="twitter:image" content="hero.jpg">
+<meta name="theme-color" content="#0E1712">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="League One">
+<link rel="apple-touch-icon" href="logo.png">
+<link rel="manifest" href="manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Anton&display=swap" rel="stylesheet">
 <style>
@@ -486,6 +498,18 @@
   .empty{color:var(--muted); font-size:13px; padding:24px 0; text-align:center;}
   .loading{color:var(--muted); font-size:13px;}
   .footnote{font-size:11px; color:var(--muted); margin-top:28px; line-height:1.6;}
+  .countdown-banner{
+    display:flex; align-items:baseline; gap:10px; justify-content:center;
+    background:var(--surface); border:1px solid var(--green); border-radius:12px;
+    padding:12px; margin-bottom:24px; backdrop-filter:blur(20px);
+    box-shadow:0 0 16px var(--green-glow);
+  }
+  .countdown-num{
+    font-family:'Anton'; font-size:26px; color:var(--green); letter-spacing:1px;
+    text-shadow:0 0 12px var(--green-glow);
+  }
+  .countdown-label{ font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:1.5px; }
+
   .legacy-band{
     display:flex; align-items:center; justify-content:center; gap:14px;
     margin-top:40px; padding:16px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line);
@@ -564,6 +588,11 @@
       </div>
     </div>
 
+    <div class="countdown-banner" id="countdownBanner" style="display:none;">
+      <span class="countdown-num" id="countdownNum">—</span>
+      <span class="countdown-label" id="countdownLabel">days until draft</span>
+    </div>
+
     <div class="bubblewatch">
       <div class="bw-head">
         <h2>Bubble Watch</h2>
@@ -586,6 +615,11 @@
         <div class="section-title">Weekly Highlights</div>
         <div id="highlights"><div class="loading">Loading…</div></div>
       </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="section-title">Recent Transactions</div>
+      <div id="transactionFeed"><div class="loading">Loading…</div></div>
     </div>
 
     <div class="card deco-football" style="margin-top:16px;">
@@ -717,9 +751,13 @@
     <div class="card" id="rulesBody">
       <p style="color:var(--muted); font-size:14px; line-height:1.6;">
         12 teams split into a 6-team Major League and a 6-team Minor League after the final
-        game of this season's playoffs. Records/points determine the cutline — edit this
-        page's exact criteria in the admin panel.
+        game of this season's playoffs. Records/points determine the cutline.
       </p>
+    </div>
+    <button class="add-btn admin-only" id="editRulesBtn">✎ Edit rules</button>
+    <div class="inline-form admin-only" id="rulesForm" style="display:none;">
+      <textarea id="rulesText" placeholder="Write your league rules…" style="min-height:180px;"></textarea>
+      <div class="btn-row"><button class="btn" id="rulesSubmit">Save</button><button class="btn secondary" id="rulesCancel">Cancel</button></div>
     </div>
   </section>
 
@@ -765,12 +803,9 @@
    CONFIG — fill these in
    ========================================================= */
 const LEAGUES = {
-  // This year: single unified league.
-  current: { id: "1392545106589925376", label: "League" },
-  // Next year, once the split happens, fill these in and the
-  // dual-league "other side" views light up automatically.
-  major: null, // e.g. { id: "XXXXXXXXXXXXXXXXXXXX", label: "Major" }
-  minor: null, // e.g. { id: "XXXXXXXXXXXXXXXXXXXX", label: "Minor" }
+  current: { id: "1392545106589925376", label: "League" }, // confirmed: Minor
+  major: { id: "1401566676922728448", label: "Major" },
+  minor: { id: "1392545106589925376", label: "Minor" },
 };
 
 // Firebase project config — replace with your own (Firebase console
@@ -1012,6 +1047,53 @@ async function renderMatchups(week) {
     dashList.innerHTML = html.split('</div>').slice(0, 15).join('</div>') || html; // trimmed preview
   } catch (e) {
     list.innerHTML = `<div class="empty">Couldn't load matchups (${e.message}).</div>`;
+  }
+}
+
+/* ---------- Countdown banner (draft day) ---------- */
+async function renderCountdown(league) {
+  const banner = document.getElementById("countdownBanner");
+  if (!league.draft_id) { banner.style.display = "none"; return; }
+  try {
+    const draft = await sleeperGet(`/draft/${league.draft_id}`);
+    const now = Date.now();
+    if (draft.start_time && draft.start_time > now && draft.status !== "complete") {
+      const days = Math.ceil((draft.start_time - now) / 86400000);
+      document.getElementById("countdownNum").textContent = days;
+      document.getElementById("countdownLabel").textContent = days === 1 ? "day until draft" : "days until draft";
+      banner.style.display = "flex";
+    } else {
+      banner.style.display = "none";
+    }
+  } catch (e) {
+    banner.style.display = "none";
+  }
+}
+
+/* ---------- Recent transactions (waivers / trades) ---------- */
+async function renderTransactions() {
+  const el = document.getElementById("transactionFeed");
+  try {
+    const weeksToCheck = [state.currentWeek, state.currentWeek - 1].filter(w => w >= 1);
+    const results = await Promise.all(weeksToCheck.map(w => sleeperGet(`/league/${state.league.league_id}/transactions/${w}`).catch(() => [])));
+    let all = results.flat().filter(t => t.status === "complete").sort((a,b) => b.created - a.created).slice(0, 8);
+    if (!all.length) { el.innerHTML = '<div class="empty">No recent transactions.</div>'; return; }
+
+    const byRoster = {};
+    state.standings.forEach(s => byRoster[s.rosterId] = s.name);
+    const players = await getPlayersCache().catch(() => ({}));
+    const playerName = (id) => { const p = players[id]; return p ? (p.first_name ? `${p.first_name} ${p.last_name}` : p.last_name) : id; };
+
+    el.innerHTML = all.map(t => {
+      const kind = t.type === "trade" ? "Trade" : t.type === "waiver" ? "Waiver" : "Free agent";
+      const teams = (t.roster_ids || []).map(rid => byRoster[rid]).filter(Boolean).join(" ↔ ");
+      const added = t.adds ? Object.keys(t.adds).map(playerName) : [];
+      const dropped = t.drops ? Object.keys(t.drops).map(playerName) : [];
+      const detail = [added.length ? `+ ${added.join(', ')}` : '', dropped.length ? `− ${dropped.join(', ')}` : ''].filter(Boolean).join('  ·  ');
+      return `<div class="stat-row"><span class="stat-label">${kind}${teams ? ' · ' + teams : ''}${detail ? ' · ' + detail : ''}</span></div>`;
+    }).join("");
+  } catch (e) {
+    el.innerHTML = '<div class="empty">Couldn\'t load transactions.</div>';
   }
 }
 
@@ -1299,6 +1381,8 @@ async function loadLeague() {
     renderTeams(state.standings);
     renderMatchups(state.week);
     renderDraft(league);
+    renderCountdown(league);
+    renderTransactions();
     renderOnBubble(state.standings);
     renderHighlights(state.week);
     renderTrendChart();
@@ -1331,11 +1415,17 @@ document.getElementById("weekNext").addEventListener("click", () => {
 async function loadManualContent() {
   if (!db) return; // Firebase not configured yet
   try {
-    const [annSnap, rankSnap, histSnap] = await Promise.all([
+    const [annSnap, rankSnap, histSnap, rulesSnap] = await Promise.all([
       db.collection("announcements").orderBy("createdAt", "desc").limit(10).get(),
       db.collection("powerRankings").orderBy("rank", "asc").get(),
       db.collection("history").orderBy("createdAt", "desc").get(),
+      db.collection("siteContent").doc("rules").get(),
     ]);
+
+    if (rulesSnap.exists && rulesSnap.data().body) {
+      document.getElementById("rulesBody").innerHTML = `<p style="color:var(--muted); font-size:14px; line-height:1.6; white-space:pre-wrap;">${rulesSnap.data().body}</p>`;
+      document.getElementById("rulesText").value = rulesSnap.data().body;
+    }
 
     const annList = document.getElementById("announceList");
     if (!annSnap.empty) {
@@ -1454,6 +1544,24 @@ wireInlineForm({
     return db.collection("champions").doc(year).set({ year, teamName });
   },
   onDone: renderBanners,
+});
+
+// Rules page is a single editable document, not an add-to-a-list form
+document.getElementById("editRulesBtn").addEventListener("click", () => {
+  document.getElementById("rulesForm").style.display = "block";
+  document.getElementById("editRulesBtn").style.display = "none";
+});
+document.getElementById("rulesCancel").addEventListener("click", () => {
+  document.getElementById("rulesForm").style.display = "none";
+  document.getElementById("editRulesBtn").style.display = "block";
+});
+document.getElementById("rulesSubmit").addEventListener("click", async () => {
+  if (!db) { alert("Firebase isn't configured yet — add your config at the top of the file."); return; }
+  const body = document.getElementById("rulesText").value.trim();
+  await db.collection("siteContent").doc("rules").set({ body });
+  document.getElementById("rulesForm").style.display = "none";
+  document.getElementById("editRulesBtn").style.display = "block";
+  loadManualContent();
 });
 
 
