@@ -161,6 +161,21 @@
   }
   .pennant.tbd .champ{color:var(--muted); font-weight:600;}
 
+  /* ---------- League switcher ---------- */
+  .league-switcher{
+    display:flex; gap:2px; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:999px; padding:3px;
+  }
+  .switch-btn{
+    background:transparent; border:none; color:var(--muted);
+    padding:6px 14px; border-radius:999px; font-size:12px; font-weight:600; cursor:pointer;
+    transition:all .15s ease;
+  }
+  .switch-btn.active{
+    background:linear-gradient(135deg, var(--gold), var(--gold-2)); color:#07080A;
+    box-shadow:0 0 12px var(--gold-glow);
+  }
+
   /* ---------- Edit mode ---------- */
   .edit-toggle{
     background:var(--surface-2); border:1px solid var(--line); color:var(--muted);
@@ -201,7 +216,7 @@
   }
   .header-inner{
     max-width:1180px; margin:0 auto; padding:18px 24px;
-    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
   }
   .brand{display:flex; align-items:center; gap:12px;}
   .brand .mark{
@@ -548,7 +563,13 @@
         <div class="brand-sub" id="leagueSub">Loading league…</div>
       </div>
     </div>
-    <button class="edit-toggle" id="editToggle">Edit Mode: Off</button>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div class="league-switcher" id="leagueSwitcher">
+        <button class="switch-btn" data-league="major">Major</button>
+        <button class="switch-btn" data-league="minor">Minor</button>
+      </div>
+      <button class="edit-toggle" id="editToggle">Edit Mode: Off</button>
+    </div>
   </div>
   <nav class="tabs" id="tabs">
     <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
@@ -558,7 +579,6 @@
     <button class="tab-btn" data-tab="teams">Teams</button>
     <button class="tab-btn" data-tab="bracket">Bracket</button>
     <button class="tab-btn" data-tab="h2h">Head-to-Head</button>
-    <button class="tab-btn" data-tab="other">Other League</button>
     <button class="tab-btn" data-tab="draft">Draft</button>
     <button class="tab-btn" data-tab="history">History</button>
     <button class="tab-btn" data-tab="rules">Rules</button>
@@ -716,17 +736,6 @@
     <div class="footnote">Based on regular-season matchups fetched this session — not multi-year history yet.</div>
   </section>
 
-  <!-- OTHER LEAGUE -->
-  <section class="view" id="view-other">
-    <div class="section-title">Other League</div>
-    <div class="card" id="otherLeagueBody">
-      <div class="empty">
-        Not set up yet — once the Major/Minor split happens next year, add the other
-        league's Sleeper ID to the config and its standings will show here automatically.
-      </div>
-    </div>
-  </section>
-
   <!-- DRAFT -->
   <section class="view" id="view-draft">
     <div class="section-title">Draft Recap</div>
@@ -803,10 +812,10 @@
    CONFIG — fill these in
    ========================================================= */
 const LEAGUES = {
-  current: { id: "1392545106589925376", label: "League" }, // confirmed: Minor
   major: { id: "1401566676922728448", label: "Major" },
   minor: { id: "1392545106589925376", label: "Minor" },
 };
+let activeLeagueKey = localStorage.getItem("activeLeagueKey") || "minor";
 
 // Firebase project config — replace with your own (Firebase console
 // → Project settings → General → Your apps → SDK setup and config).
@@ -1283,30 +1292,6 @@ async function loadH2H() {
 }
 
 /* ---------- Other league (Major/Minor split, next year) ---------- */
-async function renderOtherLeague() {
-  const el = document.getElementById("otherLeagueBody");
-  const other = LEAGUES.major && LEAGUES.minor ? [LEAGUES.major, LEAGUES.minor] : null;
-  if (!other) return; // leave the default placeholder message
-  try {
-    const [leagueA, leagueB] = await Promise.all([
-      sleeperGet(`/league/${LEAGUES.major.id}`), sleeperGet(`/league/${LEAGUES.minor.id}`)
-    ]);
-    const [usersA, rostersA, usersB, rostersB] = await Promise.all([
-      sleeperGet(`/league/${LEAGUES.major.id}/users`), sleeperGet(`/league/${LEAGUES.major.id}/rosters`),
-      sleeperGet(`/league/${LEAGUES.minor.id}/users`), sleeperGet(`/league/${LEAGUES.minor.id}/rosters`),
-    ]);
-    const standA = buildStandings(rostersA, usersA), standB = buildStandings(rostersB, usersB);
-    const table = (label, stand) => `
-      <h4 style="font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:0 0 10px;">${label}</h4>
-      <table><tbody>
-        ${stand.map((t,i) => `<tr><td class="rank">${i+1}</td><td>${t.name}</td><td class="mono">${t.wins}-${t.losses}</td></tr>`).join("")}
-      </tbody></table>`;
-    el.innerHTML = `<div class="grid grid-2">${table("Major · " + leagueA.name, standA)}${table("Minor · " + leagueB.name, standB)}</div>`;
-  } catch (e) {
-    el.innerHTML = '<div class="empty">Couldn\'t load the other league.</div>';
-  }
-}
-
 /* ---------- Team identity (custom colors) ---------- */
 async function applyTeamIdentity() {
   if (!db) return;
@@ -1358,7 +1343,7 @@ async function renderBanners() {
 
 async function loadLeague() {
   try {
-    const league = await sleeperGet(`/league/${LEAGUES.current.id}`);
+    const league = await sleeperGet(`/league/${LEAGUES[activeLeagueKey].id}`);
     state.league = league;
     document.getElementById("leagueName").textContent = league.name || "The Cutline";
     const heroNameEl = document.getElementById("heroLeagueName");
@@ -1388,7 +1373,6 @@ async function loadLeague() {
     renderTrendChart();
     renderBracket(league);
     loadH2H();
-    renderOtherLeague();
     applyTeamIdentity();
     renderBanners();
   } catch (e) {
@@ -1397,6 +1381,17 @@ async function loadLeague() {
     console.error(e);
   }
 }
+
+function setActiveLeague(key) {
+  activeLeagueKey = key;
+  localStorage.setItem("activeLeagueKey", key);
+  document.querySelectorAll(".switch-btn").forEach(b => b.classList.toggle("active", b.dataset.league === key));
+  loadLeague();
+}
+document.querySelectorAll(".switch-btn").forEach(btn => {
+  btn.addEventListener("click", () => setActiveLeague(btn.dataset.league));
+});
+document.querySelectorAll(".switch-btn").forEach(b => b.classList.toggle("active", b.dataset.league === activeLeagueKey));
 
 document.getElementById("weekPrev").addEventListener("click", () => {
   state.week = Math.max(1, state.week - 1);
