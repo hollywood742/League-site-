@@ -432,7 +432,13 @@
   .team-card .rec{font-family:'JetBrains Mono'; font-size:12px; color:var(--muted);}
 
   /* ---------- Power rankings ---------- */
-  .pr-row{display:flex; gap:14px; padding:14px 0; border-bottom:1px solid var(--line);}
+  .pr-row{display:flex; align-items:center; gap:14px; padding:14px 0; border-bottom:1px solid var(--line);}
+  .delete-btn{
+    background:transparent; border:1px solid var(--line); color:var(--muted);
+    width:26px; height:26px; border-radius:8px; cursor:pointer; flex:0 0 auto; font-size:13px;
+    transition:all .15s ease;
+  }
+  .delete-btn:hover{ color:var(--red); border-color:var(--red); }
   .pr-row:last-child{border-bottom:none;}
   .pr-rank{
     font-family:'Space Grotesk'; font-weight:700; font-size:20px;
@@ -442,6 +448,7 @@
   }
   .pr-move{font-family:'JetBrains Mono'; font-size:11px; margin-left:4px;}
   .pr-move.up{color:var(--teal);} .pr-move.down{color:var(--red);}
+  .pr-body{flex:1; min-width:0;}
   .pr-body h4{margin:0 0 4px; font-size:14px;}
   .pr-body p{margin:0; font-size:13px; color:var(--muted); line-height:1.5;}
 
@@ -1387,6 +1394,7 @@ function setActiveLeague(key) {
   localStorage.setItem("activeLeagueKey", key);
   document.querySelectorAll(".switch-btn").forEach(b => b.classList.toggle("active", b.dataset.league === key));
   loadLeague();
+  loadManualContent();
 }
 document.querySelectorAll(".switch-btn").forEach(btn => {
   btn.addEventListener("click", () => setActiveLeague(btn.dataset.league));
@@ -1412,7 +1420,7 @@ async function loadManualContent() {
   try {
     const [annSnap, rankSnap, histSnap, rulesSnap] = await Promise.all([
       db.collection("announcements").orderBy("createdAt", "desc").limit(10).get(),
-      db.collection("powerRankings").orderBy("rank", "asc").get(),
+      db.collection("powerRankings").get(),
       db.collection("history").orderBy("createdAt", "desc").get(),
       db.collection("siteContent").doc("rules").get(),
     ]);
@@ -1431,11 +1439,23 @@ async function loadManualContent() {
     }
 
     const rankList = document.getElementById("rankingsList");
-    if (!rankSnap.empty) {
-      rankList.innerHTML = rankSnap.docs.map((d, i) => {
+    const rankDocs = rankSnap.docs
+      .filter(d => d.data().leagueKey === activeLeagueKey)
+      .sort((a, b) => (a.data().rank || 0) - (b.data().rank || 0));
+    if (rankDocs.length) {
+      rankList.innerHTML = rankDocs.map((d, i) => {
         const r = d.data();
-        return `<div class="pr-row"><div class="pr-rank">${i+1}</div><div class="pr-body"><h4>${r.title || ''}</h4><p>${r.body || ''}</p></div></div>`;
+        return `<div class="pr-row"><div class="pr-rank">${i+1}</div><div class="pr-body"><h4>${r.title || ''}</h4><p>${r.body || ''}</p></div><button class="delete-btn admin-only" data-id="${d.id}" data-collection="powerRankings" title="Delete">✕</button></div>`;
       }).join("");
+      rankList.querySelectorAll(".delete-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("Delete this ranking entry?")) return;
+          await db.collection(btn.dataset.collection).doc(btn.dataset.id).delete();
+          loadManualContent();
+        });
+      });
+    } else {
+      rankList.innerHTML = '<div class="empty">No power rankings posted yet.</div>';
     }
 
     const histList = document.getElementById("historyList");
@@ -1519,7 +1539,8 @@ wireInlineForm({
   submitId: "rankingSubmit", cancelId: "rankingCancel",
   extra: async (title, body) => {
     const countSnap = await db.collection("powerRankings").get();
-    return db.collection("powerRankings").add({ title, body, rank: countSnap.size + 1, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    const countInLeague = countSnap.docs.filter(d => d.data().leagueKey === activeLeagueKey).length;
+    return db.collection("powerRankings").add({ title, body, leagueKey: activeLeagueKey, rank: countInLeague + 1, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
   },
   onDone: loadManualContent,
 });
