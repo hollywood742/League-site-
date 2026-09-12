@@ -585,8 +585,6 @@
     <button class="tab-btn" data-tab="rankings">Power Rankings</button>
     <button class="tab-btn" data-tab="teams">Teams</button>
     <button class="tab-btn" data-tab="bracket">Bracket</button>
-    <button class="tab-btn" data-tab="h2h">Head-to-Head</button>
-    <button class="tab-btn" data-tab="draft">Draft</button>
     <button class="tab-btn" data-tab="history">History</button>
     <button class="tab-btn" data-tab="rules">Rules</button>
   </nav>
@@ -722,31 +720,6 @@
   <section class="view" id="view-bracket">
     <div class="section-title">Playoff Bracket</div>
     <div class="card" id="bracketBody"><div class="empty">Playoffs haven't started yet.</div></div>
-  </section>
-
-  <!-- HEAD TO HEAD -->
-  <section class="view" id="view-h2h">
-    <div class="section-title">Head-to-Head (this season)</div>
-    <div class="card">
-      <div class="grid grid-2" style="margin-bottom:16px;">
-        <div>
-          <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Team A</label>
-          <select id="h2hA" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 11px;"></select>
-        </div>
-        <div>
-          <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Team B</label>
-          <select id="h2hB" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 11px;"></select>
-        </div>
-      </div>
-      <div id="h2hResult"><div class="empty">Pick two teams above.</div></div>
-    </div>
-    <div class="footnote">Based on regular-season matchups fetched this session — not multi-year history yet.</div>
-  </section>
-
-  <!-- DRAFT -->
-  <section class="view" id="view-draft">
-    <div class="section-title">Draft Recap</div>
-    <div class="card" id="draftBody"><div class="loading">Loading draft…</div></div>
   </section>
 
   <!-- HISTORY -->
@@ -1166,34 +1139,6 @@ async function renderTransactions() {
   }
 }
 
-async function renderDraft(league) {
-  const el = document.getElementById("draftBody");
-  if (!league.draft_id) { el.innerHTML = '<div class="empty">No draft found for this league.</div>'; return; }
-  try {
-    const picks = await sleeperGet(`/draft/${league.draft_id}/picks`);
-    if (!picks.length) { el.innerHTML = '<div class="empty">Draft picks not available yet.</div>'; return; }
-    const byRoster = {};
-    state.standings.forEach(s => byRoster[s.rosterId] = s);
-    const rounds = {};
-    picks.forEach(p => {
-      rounds[p.round] = rounds[p.round] || [];
-      rounds[p.round].push(p);
-    });
-    let html = "";
-    Object.keys(rounds).sort((a,b)=>a-b).forEach(rnd => {
-      html += `<h4 style="margin:18px 0 8px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Round ${rnd}</h4>`;
-      html += rounds[rnd].map(p => {
-        const team = byRoster[p.roster_id]?.name || `Roster ${p.roster_id}`;
-        const name = p.metadata ? `${p.metadata.first_name || ''} ${p.metadata.last_name || ''}`.trim() : p.player_id;
-        return `<div class="pr-row" style="padding:8px 0;"><div class="pr-rank" style="font-size:13px;width:24px;">${p.pick_no}</div><div class="pr-body"><h4 style="margin:0;">${name || 'Unknown'}</h4><p>${team}${p.metadata?.position ? ' · ' + p.metadata.position : ''}</p></div></div>`;
-      }).join("");
-    });
-    el.innerHTML = html;
-  } catch (e) {
-    el.innerHTML = `<div class="empty">Couldn't load draft (${e.message}).</div>`;
-  }
-}
-
 /* ---------- On the Bubble ---------- */
 function renderOnBubble(standings) {
   const el = document.getElementById("onBubble");
@@ -1316,42 +1261,6 @@ async function renderBracket(league) {
 }
 
 /* ---------- Head-to-head (this season) ---------- */
-async function loadH2H() {
-  const selA = document.getElementById("h2hA"), selB = document.getElementById("h2hB");
-  const opts = state.standings.map(t => `<option value="${t.rosterId}">${t.name}</option>`).join("");
-  selA.innerHTML = opts; selB.innerHTML = opts;
-  if (state.standings[1]) selB.value = state.standings[1].rosterId;
-
-  async function compute() {
-    const a = Number(selA.value), b = Number(selB.value);
-    const result = document.getElementById("h2hResult");
-    if (a === b) { result.innerHTML = '<div class="empty">Pick two different teams.</div>'; return; }
-    result.innerHTML = '<div class="loading">Computing…</div>';
-    let aw = 0, bw = 0, meetings = 0;
-    for (let w = 1; w < state.currentWeek; w++) {
-      const matchups = await sleeperGet(`/league/${state.league.league_id}/matchups/${w}`).catch(() => []);
-      const ma = matchups.find(m => m.roster_id === a);
-      const mb = matchups.find(m => m.roster_id === b && m.matchup_id === ma?.matchup_id);
-      if (ma && mb) {
-        meetings++;
-        if ((ma.points||0) > (mb.points||0)) aw++; else if ((mb.points||0) > (ma.points||0)) bw++;
-      }
-    }
-    const byRoster = {}; state.standings.forEach(s => byRoster[s.rosterId] = s.name);
-    result.innerHTML = meetings === 0
-      ? `<div class="empty">${byRoster[a]} and ${byRoster[b]} haven't played this season.</div>`
-      : `<div class="h2h-big">
-          <div><div class="h2h-num" style="color:var(--gold)">${aw}</div><div class="h2h-label">${byRoster[a]}</div></div>
-          <div class="mono" style="color:var(--muted)">vs</div>
-          <div><div class="h2h-num" style="color:var(--teal)">${bw}</div><div class="h2h-label">${byRoster[b]}</div></div>
-        </div>`;
-  }
-  selA.addEventListener("change", compute);
-  selB.addEventListener("change", compute);
-  compute();
-}
-
-/* ---------- Other league (Major/Minor split, next year) ---------- */
 /* ---------- Team identity (custom colors) ---------- */
 async function applyTeamIdentity() {
   if (!db) return;
@@ -1425,14 +1334,12 @@ async function loadLeague() {
     renderStandingsTable(state.standings);
     renderTeams(state.standings);
     renderMatchups(state.week);
-    renderDraft(league);
     renderCountdown(league);
     renderTransactions();
     renderOnBubble(state.standings);
     renderHighlights(state.week);
     renderTrendChart();
     renderBracket(league);
-    loadH2H();
     applyTeamIdentity();
     renderBanners();
   } catch (e) {
