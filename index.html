@@ -796,6 +796,13 @@
   </div>
 </div>
 
+<div class="admin-panel" id="matchupModal">
+  <div class="admin-box" style="max-width:580px;">
+    <div id="matchupModalBody"><div class="loading">Loading matchup…</div></div>
+    <div class="btn-row"><button class="btn secondary" id="matchupModalClose">Close</button></div>
+  </div>
+</div>
+
 <div class="admin-panel" id="adminPanel">
   <div class="admin-box">
     <h3>Commissioner Sign-in</h3>
@@ -1002,6 +1009,47 @@ document.getElementById("teamModalClose").addEventListener("click", () => {
   document.getElementById("teamModal").classList.remove("open");
 });
 
+/* ---------- Matchup detail modal (click a matchup on the Matchups tab) ---------- */
+async function openMatchupModal(rosterIdA, rosterIdB) {
+  const modal = document.getElementById("matchupModal");
+  const body = document.getElementById("matchupModalBody");
+  modal.classList.add("open");
+  body.innerHTML = '<div class="loading">Loading matchup…</div>';
+
+  const raw = state.matchupsRaw || [];
+  const a = raw.find(m => m.roster_id === rosterIdA);
+  const b = raw.find(m => m.roster_id === rosterIdB);
+  const byRoster = {};
+  state.standings.forEach(s => byRoster[s.rosterId] = s);
+  const ta = byRoster[rosterIdA] || { name: "TBD" };
+  const tb = byRoster[rosterIdB] || { name: "TBD" };
+
+  try {
+    const players = await getPlayersCache();
+    const playerRow = (id, pts) => {
+      const p = players[id];
+      const name = p ? (p.first_name ? `${p.first_name} ${p.last_name}` : p.last_name) : id;
+      const pos = p?.position || '';
+      return `<div class="stat-row"><span class="stat-label">${name}${pos ? ' · ' + pos : ''}</span><span class="stat-val">${(pts ?? 0).toFixed(1)}</span></div>`;
+    };
+    const teamColumn = (team, m) => {
+      const starters = m?.starters || [];
+      const pts = m?.players_points || {};
+      return `
+        <div>
+          <h4 style="margin:0 0 10px;font-size:15px;">${team.name} <span class="mono" style="color:var(--muted);font-size:13px;">${(m?.points ?? 0).toFixed(1)}</span></h4>
+          ${starters.length ? starters.map(id => playerRow(id, pts[id])).join("") : '<div class="empty">No lineup set.</div>'}
+        </div>`;
+    };
+    body.innerHTML = `<div class="grid grid-2" style="gap:20px;">${teamColumn(ta, a)}${teamColumn(tb, b)}</div>`;
+  } catch (e) {
+    body.innerHTML = '<div class="empty">Couldn\'t load player scores.</div>';
+  }
+}
+document.getElementById("matchupModalClose").addEventListener("click", () => {
+  document.getElementById("matchupModal").classList.remove("open");
+});
+
 function renderTeams(standings) {
   const grid = document.getElementById("teamsGrid");
   grid.innerHTML = standings.map(t => `
@@ -1038,6 +1086,8 @@ async function renderMatchups(week) {
   try {
     const matchups = await sleeperGet(`/league/${state.league.league_id}/matchups/${week}`);
     if (!matchups.length) { list.innerHTML = '<div class="empty">No matchup data for this week.</div>'; return; }
+    state.matchupsRaw = matchups;
+    state.matchupsWeek = week;
     const byRoster = {};
     state.standings.forEach(s => byRoster[s.rosterId] = s);
     const grouped = {};
@@ -1051,7 +1101,7 @@ async function renderMatchups(week) {
       const ta = byRoster[a?.roster_id] || { name: "TBD" };
       const tb = byRoster[b?.roster_id] || { name: "TBD" };
       html += `
-        <div class="matchup-card">
+        <div class="matchup-card" data-a="${a?.roster_id ?? ''}" data-b="${b?.roster_id ?? ''}" style="cursor:pointer;">
           <div class="mc-team"><div class="mc-name">${ta.name}</div></div>
           <div class="mc-score">${(a?.points ?? 0).toFixed(1)}</div>
           <div class="mc-vs">vs</div>
@@ -1061,6 +1111,9 @@ async function renderMatchups(week) {
     });
     list.innerHTML = html;
     dashList.innerHTML = html.split('</div>').slice(0, 15).join('</div>') || html; // trimmed preview
+    document.querySelectorAll(".matchup-card").forEach(card => {
+      card.addEventListener("click", () => openMatchupModal(Number(card.dataset.a), Number(card.dataset.b)));
+    });
   } catch (e) {
     list.innerHTML = `<div class="empty">Couldn't load matchups (${e.message}).</div>`;
   }
